@@ -2,6 +2,7 @@
 
 import Simplenote
 import Control.Monad
+import Control.Monad.IO.Class
 import Data.Maybe
 import Text.Printf
 import Data.Time.LocalTime
@@ -27,26 +28,16 @@ showNote note = do
     (fromJust $ deleted note) (fromJust $ version note) (fromJust $ syncnum note)
   putStrLn $ maybe "*** No content ***" id (content note)
   
-showAllNotes :: [Note] -> String -> String -> IO ()
-showAllNotes notes email token =
-  forM_ notes (\i -> do note <- getNote email token (fromJust $ key i)
-                        showNote note)
-
 main :: IO ()
 main = do
   let email = "abc@example.com"
-  let password = "password"
-  token <- getToken email password
-  notes <- getIndex email token
-  showAllNotes notes email token
-  --
-  -- note <- getNote email token "3c4b6b1c176111e581fcc9023998867e"
-  -- let Just str = content note
-  -- now <- getPOSIXTime
-  -- let note' = note { content = Just (str ++ "Hello, world !!!\n"),
-  --                    modifydate = Just (posixTimeToStr now) }
-  -- updateNote email token note'
-  --
-  -- note <- createNote email token "New note 6\nTest for SimplenoteHS"
-  -- showNote note
-  return ()
+  let pass = "password"
+  ret <- execSimplenote email pass $ do
+    notes <-  getIndex
+    forM_ notes (\i -> do note <- getNote (fromJust $ key i)
+                          liftIO $ showNote note)
+    note <- createNote "New note 2\nTest for SimplenoteHS"
+    liftIO $ showNote note
+  case ret of
+    Left str -> print str
+    Right _ -> return ()
