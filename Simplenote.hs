@@ -14,9 +14,10 @@ import Data.Aeson.TH (deriveJSON, defaultOptions, Options(..))
 import Data.Time.Clock.POSIX
 import Data.Time.Format
 import System.Locale
-import Data.Maybe
 import Control.Monad.Error
-import Control.Monad.Reader
+import Control.Monad.Trans.Resource
+
+type SimplenoteManager = (Manager, String, String)
 
 data Note = Note { key :: Maybe String,
                    content :: Maybe String,
@@ -40,23 +41,29 @@ strToPosixTime :: String -> POSIXTime
 strToPosixTime str = realToFrac (read str :: Double)
 
 posixTimeToStr :: POSIXTime -> String
-posixTimeToStr = (formatTime defaultTimeLocale "%s%Q") . posixSecondsToUTCTime
+posixTimeToStr = formatTime defaultTimeLocale "%s%Q" . posixSecondsToUTCTime
 
 baseUrl :: String
 baseUrl = "https://app.simplenote.com/"
 
-getToken :: Manager -> String -> String -> (ErrorT String IO) String
+defaultRequest url method' params = do
+  req0 <- parseUrl $ baseUrl ++ url
+  return req0 {
+    method = method',
+    queryString = BS.pack $ urlEncodeVars params,
+    checkStatus = \_ _ _ -> Nothing }
+
+getToken :: Manager -> String -> String -> IO (Either String String)
 getToken mgr email pass = do
-  req0 <- parseUrl $ baseUrl ++ "api/login"
+  req0 <- defaultRequest "api/login" "POST" []
   let req = req0 {
-        checkStatus = \_ _ _ -> Nothing,
-        method = "POST",
         requestBody = RequestBodyBS . Base64.encode . BS.pack $
                       urlEncodeVars [("email", email), ("password", pass)] }
   res <- httpLbs req mgr
-  case (statusCode . responseStatus) res of
-    200 -> return $ (LBS.unpack . responseBody) res
-    x -> throwError $ "Get token status error: " ++ show x
+  let code = (statusCode . responseStatus) res
+  if code /= 200
+    then return . Left $ "Get token status error: " ++ show code
+    else return . Right $ (LBS.unpack . responseBody) res
 
 data NoteIndex = NoteIndex { ncount :: Int,
                              ndata :: [Note],
@@ -65,68 +72,85 @@ data NoteIndex = NoteIndex { ncount :: Int,
 
 deriveJSON defaultOptions { fieldLabelModifier = drop 1 } ''NoteIndex
 
-getIndex' :: Maybe String -> [Note]
-          -> ReaderT (Manager, String, String) (ErrorT String IO) [Note]
-getIndex' mark data0 = do
-  (mgr, email, token) <- ask
-  req0 <- parseUrl $ baseUrl ++ "api2/index"
-  let params0 = [("email", email), ("auth", token), ("length", "100")]
-  let params = maybe params0 (\x -> ("mark", x) : params0) mark
-  let req = req0 { queryString = BS.pack $ urlEncodeVars params }
-  res <- httpLbs req mgr
-  let index = fromJust . decode . responseBody $ res :: NoteIndex
-  case nmark index of
-    Nothing -> return $ data0 ++ ndata index
-    x -> getIndex' x (data0 ++ ndata index)
+getIndex :: SimplenoteManager -> IO (Either String [Note])
+getIndex snmgr = getIndex' Nothing [] where
+  getIndex' mark data0 = do
+    let (mgr, email, token) = snmgr
+    let params0 = [("email", email), ("auth", token), ("length", "100")]
+    let params = maybe params0 (\x -> ("mark", x) : params0) mark
+    req <- defaultRequest "api2/index" "GET" params
+    res <- httpLbs req mgr
+    let code = (statusCode . responseStatus) res
+    if code /= 200
+      then return . Left $ "Get index status error: " ++ show code
+      else case decode . responseBody $ res :: Maybe NoteIndex of
+      Nothing -> return . Left $ "Get index JSON decode error"
+      Just index -> case nmark index of
+        Nothing -> return . Right $ data0 ++ ndata index
+        x -> getIndex' x (data0 ++ ndata index)
 
-getIndex :: ReaderT (Manager, String, String) (ErrorT String IO) [Note]
-getIndex = getIndex' Nothing []
-
-getNote :: String -> ReaderT (Manager, String, String) (ErrorT String IO) Note
-getNote nkey = do
-  (mgr, email, token) <- ask
-  req0 <- parseUrl $ baseUrl ++ "api2/data/" ++ nkey
+getNote :: SimplenoteManager -> String -> IO (Either String Note)
+getNote snmgr nkey = do
+  let (mgr, email, token) = snmgr
   let params = [("email", email), ("auth", token)]
-  let req = req0 { queryString = BS.pack $ urlEncodeVars params }
+  req <- defaultRequest ("api2/data/" ++ nkey) "GET" params
   res <- httpLbs req mgr
-  let note = fromJust . decode . responseBody $ res :: Note
-  return note
+  let code = (statusCode . responseStatus) res
+  if code /= 200
+    then return . Left $ "Get note status error: " ++ show code
+    else case decode . responseBody $ res :: Maybe Note of
+    Nothing -> return . Left $ "Get note JSON decode error"
+    Just note -> return . Right $ note
 
-updateNote :: Note -> ReaderT (Manager, String, String) (ErrorT String IO) Note
-updateNote note = do
-  (mgr, email, token) <- ask
-  req0 <- parseUrl $ baseUrl ++ "api2/data" ++ maybe "" ('/':) (key note)
+updateNote :: SimplenoteManager -> Note -> IO (Either String Note)
+updateNote snmgr note = do
+  let (mgr, email, token) = snmgr
   let params = [("email", email), ("auth", token)]
-  let req = req0 { method = "POST",
-                   queryString = BS.pack $ urlEncodeVars params,
-                   requestBody = RequestBodyLBS (encode note) }
-  res <- httpLbs req mgr
-  let note' = fromJust . decode . responseBody $ res :: Note
-  return note' { content = content note }
+  req <- defaultRequest ("api2/data" ++ maybe "" ('/':) (key note)) "POST" params
+  res <- httpLbs req { requestBody = RequestBodyLBS (encode note) } mgr
+  let code = (statusCode . responseStatus) res
+  if code /= 200
+    then return . Left $ "Update note status error: " ++ show code
+    else case decode . responseBody $ res :: Maybe Note of
+    Nothing -> return . Left $ "Update note JSON decode error"
+    Just note' -> return . Right $ note' { content = content note }
 
-createNote :: String -> ReaderT (Manager, String, String) (ErrorT String IO) Note
-createNote str = do
+createNote :: SimplenoteManager -> String -> IO (Either String Note)
+createNote snmgr str = do
   time <- liftIO $ getPOSIXTime >>= return . posixTimeToStr
   let note = nullNote { createdate = Just time, modifydate = Just time,
                         content = Just str }
-  updateNote note
+  updateNote snmgr note
 
-deleteNote :: String -> ReaderT (Manager, String, String) (ErrorT String IO) ()
-deleteNote nKey = do
-  (mgr, email, token) <- ask
-  req0 <- parseUrl $ baseUrl ++ "api2/data/" ++ nKey
+deleteNote :: SimplenoteManager -> String -> IO (Either String ())
+deleteNote snmgr nKey = do
+  let (mgr, email, token) = snmgr
   let params = [("email", email), ("auth", token)]
-  let req = req0 { method = "DELETE",
-                   queryString = BS.pack $ urlEncodeVars params }
-  _ <- httpLbs req mgr
-  return ()
+  req <- defaultRequest ("api2/data/" ++ nKey) "DELETE" params
+  res <- httpLbs req mgr
+  let code = (statusCode . responseStatus) res
+  if code /= 200
+    then return . Left $ "Update note status error: " ++ show code
+    else return . Right $ ()
 
-execSimplenote :: String -> String
-               -> ReaderT (Manager, String, String) (ErrorT String IO) a
-               -> IO (Either String ())
-execSimplenote email pass process = runErrorT $ do
-  mgr <- liftIO $ newManager conduitManagerSettings
-  token <- getToken mgr email pass
-  runReaderT process (mgr, email, token)
-  liftIO $ closeManager mgr
-  return ()
+newSimplenote :: String -> String -> IO (Either String SimplenoteManager)
+newSimplenote email pass = do
+  mgr <- newManager conduitManagerSettings
+  ret <- getToken mgr email pass
+  case ret of
+    Right token -> return . Right $ (mgr, email, token)
+    Left err -> return . Left $ err
+
+closeSimplenote :: SimplenoteManager -> IO ()
+closeSimplenote snmgr = do
+  let (mgr, _, _) = snmgr
+  closeManager mgr
+
+runSimplenote :: String -> String
+                 -> (SimplenoteManager -> IO (Either String a))
+                 -> IO (Either String a)
+runSimplenote email pass process = runResourceT $ do
+  ret <- liftIO $ newSimplenote email pass
+  case ret of
+    Right snmgr -> liftIO $ process snmgr
+    Left err -> return . Left $ err
