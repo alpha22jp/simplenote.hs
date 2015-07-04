@@ -117,7 +117,7 @@ updateNote snmgr note = do
 
 createNote :: SimplenoteManager -> String -> IO (Either String Note)
 createNote snmgr str = do
-  time <- liftIO $ getPOSIXTime >>= return . posixTimeToStr
+  time <- liftIO $ fmap posixTimeToStr getPOSIXTime
   let note = nullNote { createdate = Just time, modifydate = Just time,
                         content = Just str }
   updateNote snmgr note
