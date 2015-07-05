@@ -14,7 +14,7 @@ import Data.Aeson.TH (deriveJSON, defaultOptions, Options(..))
 import Data.Time.Clock.POSIX
 import Data.Time.Format
 import System.Locale
-import Control.Monad.Error
+import Control.Monad.IO.Class
 import Control.Monad.Trans.Resource
 
 type SimplenoteManager = (Manager, String, String)
@@ -62,11 +62,10 @@ checkStatusCode res errMsg process =
 
 getToken :: Manager -> String -> String -> IO (Either String String)
 getToken mgr email pass = do
-  req0 <- defaultRequest "api/login" "POST" []
-  let req = req0 {
-        requestBody = RequestBodyBS . Base64.encode . BS.pack $
-                      urlEncodeVars [("email", email), ("password", pass)] }
-  res <- httpLbs req mgr
+  req <- defaultRequest "api/login" "POST" []
+  res <- httpLbs req {
+    requestBody = RequestBodyBS . Base64.encode . BS.pack $
+                  urlEncodeVars [("email", email), ("password", pass)] } mgr
   checkStatusCode res "Get token status error: " $
     return . Right . LBS.unpack . responseBody
 
@@ -117,7 +116,7 @@ updateNote snmgr note = do
 
 createNote :: SimplenoteManager -> String -> IO (Either String Note)
 createNote snmgr str = do
-  time <- liftIO $ fmap posixTimeToStr getPOSIXTime
+  time <- fmap posixTimeToStr getPOSIXTime
   let note = nullNote { createdate = Just time, modifydate = Just time,
                         content = Just str }
   updateNote snmgr note
@@ -128,10 +127,8 @@ deleteNote snmgr nKey = do
   let params = [("email", email), ("auth", token)]
   req <- defaultRequest ("api2/data/" ++ nKey) "DELETE" params
   res <- httpLbs req mgr
-  let code = (statusCode . responseStatus) res
-  if code /= 200
-    then return . Left $ "Update note status error: " ++ show code
-    else return . Right $ ()
+  checkStatusCode res "Update note status error: "
+    (\_ -> return . Right $ ())
 
 newSimplenote :: String -> String -> IO (Either String SimplenoteManager)
 newSimplenote email pass = do
