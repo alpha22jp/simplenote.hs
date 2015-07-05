@@ -53,6 +53,14 @@ defaultRequest url method' params = do
     queryString = BS.pack $ urlEncodeVars params,
     checkStatus = \_ _ _ -> Nothing }
 
+checkStatusCode :: Network.HTTP.Conduit.Response body
+                -> String
+                -> (Network.HTTP.Conduit.Response body -> IO (Either String a))
+                -> IO (Either String a)
+checkStatusCode res errMsg process =
+  if code /= 200 then return . Left $ errMsg ++ show code else process res
+  where code = statusCode . responseStatus $ res
+
 getToken :: Manager -> String -> String -> IO (Either String String)
 getToken mgr email pass = do
   req0 <- defaultRequest "api/login" "POST" []
@@ -60,10 +68,8 @@ getToken mgr email pass = do
         requestBody = RequestBodyBS . Base64.encode . BS.pack $
                       urlEncodeVars [("email", email), ("password", pass)] }
   res <- httpLbs req mgr
-  let code = (statusCode . responseStatus) res
-  if code /= 200
-    then return . Left $ "Get token status error: " ++ show code
-    else return . Right $ (LBS.unpack . responseBody) res
+  checkStatusCode res "Get token status error: " $
+    return . Right . LBS.unpack . responseBody
 
 data NoteIndex = NoteIndex { ncount :: Int,
                              ndata :: [Note],
@@ -80,14 +86,12 @@ getIndex snmgr = getIndex' Nothing [] where
     let params = maybe params0 (\x -> ("mark", x) : params0) mark
     req <- defaultRequest "api2/index" "GET" params
     res <- httpLbs req mgr
-    let code = (statusCode . responseStatus) res
-    if code /= 200
-      then return . Left $ "Get index status error: " ++ show code
-      else case decode . responseBody $ res :: Maybe NoteIndex of
-      Nothing -> return . Left $ "Get index JSON decode error"
-      Just index -> case nmark index of
-        Nothing -> return . Right $ data0 ++ ndata index
-        x -> getIndex' x (data0 ++ ndata index)
+    checkStatusCode res "Get index status error: "
+      (\r -> case decode . responseBody $ r :: Maybe NoteIndex of
+         Nothing -> return . Left $ "Get index JSON decode error"
+         Just index -> case nmark index of
+           Nothing -> return . Right $ data0 ++ ndata index
+           x -> getIndex' x (data0 ++ ndata index))
 
 getNote :: SimplenoteManager -> String -> IO (Either String Note)
 getNote snmgr nkey = do
@@ -95,12 +99,10 @@ getNote snmgr nkey = do
   let params = [("email", email), ("auth", token)]
   req <- defaultRequest ("api2/data/" ++ nkey) "GET" params
   res <- httpLbs req mgr
-  let code = (statusCode . responseStatus) res
-  if code /= 200
-    then return . Left $ "Get note status error: " ++ show code
-    else case decode . responseBody $ res :: Maybe Note of
-    Nothing -> return . Left $ "Get note JSON decode error"
-    Just note -> return . Right $ note
+  checkStatusCode res "Get note status error: "
+    (\r -> case decode . responseBody $ r :: Maybe Note of
+       Nothing -> return . Left $ "Get note JSON decode error"
+       Just note -> return . Right $ note)
 
 updateNote :: SimplenoteManager -> Note -> IO (Either String Note)
 updateNote snmgr note = do
@@ -109,12 +111,10 @@ updateNote snmgr note = do
   req <- defaultRequest ("api2/data" ++ maybe "" ('/':) (key note)) "POST" params
   let note1 = note { content = fmap urlEncode (content note) }
   res <- httpLbs req { requestBody = RequestBodyLBS (encode note1) } mgr
-  let code = (statusCode . responseStatus) res
-  if code /= 200
-    then return . Left $ "Update note status error: " ++ show code
-    else case decode . responseBody $ res :: Maybe Note of
-    Nothing -> return . Left $ "Update note JSON decode error"
-    Just note' -> return . Right $ note' { content = content note }
+  checkStatusCode res "Update note status error: "
+    (\r -> case decode . responseBody $ r :: Maybe Note of
+       Nothing -> return . Left $ "Update note JSON decode error"
+       Just note' -> return . Right $ note' { content = content note })
 
 createNote :: SimplenoteManager -> String -> IO (Either String Note)
 createNote snmgr str = do
