@@ -46,6 +46,7 @@ posixTimeToStr = formatTime defaultTimeLocale "%s%Q" . posixSecondsToUTCTime
 baseUrl :: String
 baseUrl = "https://app.simplenote.com/"
 
+defaultRequest :: String -> BS.ByteString -> [(String, String)] -> IO Request
 defaultRequest url method' params = do
   req0 <- parseUrl $ baseUrl ++ url
   return req0 {
