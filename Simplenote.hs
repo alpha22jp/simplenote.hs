@@ -4,7 +4,7 @@
 module Simplenote where
 
 import Network.HTTP.Conduit
-import Network.HTTP (urlEncodeVars)
+import Network.HTTP
 import Network.HTTP.Types.Status (Status(..))
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy.Char8 as LBS
@@ -107,7 +107,8 @@ updateNote snmgr note = do
   let (mgr, email, token) = snmgr
   let params = [("email", email), ("auth", token)]
   req <- defaultRequest ("api2/data" ++ maybe "" ('/':) (key note)) "POST" params
-  res <- httpLbs req { requestBody = RequestBodyLBS (encode note) } mgr
+  let note1 = note { content = fmap urlEncode (content note) }
+  res <- httpLbs req { requestBody = RequestBodyLBS (encode note1) } mgr
   let code = (statusCode . responseStatus) res
   if code /= 200
     then return . Left $ "Update note status error: " ++ show code
