@@ -4,7 +4,7 @@
 module Simplenote where
 
 import Network.HTTP.Conduit
-import Network.HTTP
+import Network.HTTP (urlEncode, urlEncodeVars)
 import Network.HTTP.Types.Status (Status(..))
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.Lazy.Char8 as LBS
@@ -53,9 +53,8 @@ defaultRequest url method' params = do
     queryString = BS.pack $ urlEncodeVars params,
     checkStatus = \_ _ _ -> Nothing }
 
-checkStatusCode :: Network.HTTP.Conduit.Response body
-                -> String
-                -> (Network.HTTP.Conduit.Response body -> IO (Either String a))
+checkStatusCode :: Response body -> String
+                -> (Response body -> IO (Either String a))
                 -> IO (Either String a)
 checkStatusCode res errMsg process =
   if code /= 200 then return . Left $ errMsg ++ show code else process res
