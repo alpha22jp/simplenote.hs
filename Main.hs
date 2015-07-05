@@ -38,9 +38,11 @@ main = do
                           case ret of
                             Left err -> liftIO $ print err
                             Right note -> liftIO $ showNote note)
+    -- ret <- liftIO $ createNote mgr "New note 1\nTest + / - _ for Simplenote.hs"
+    -- case ret of
+    --   Left err -> liftIO $ print err
+    --   Right note -> liftIO $ showNote note
     return $ Right ()
-    -- note <- createNote "New note 1\nTest for Simplenote.hs"
-    -- liftIO $ showNote note
   case ret of
     Left err -> print err
     Right _ -> return ()
