@@ -16,8 +16,10 @@ import Data.Time.Format
 import System.Locale
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Resource
+import Control.Monad.Reader
 
-type SimplenoteManager = (Manager, String, String)
+type SimplenoteEnv = (Manager, String, String)
+type SimplenoteManager a = ReaderT SimplenoteEnv a
 
 data Note = Note { key :: Maybe String,
                    content :: Maybe String,
@@ -77,61 +79,63 @@ data NoteIndex = NoteIndex { ncount :: Int,
 
 deriveJSON defaultOptions { fieldLabelModifier = drop 1 } ''NoteIndex
 
-getIndex :: SimplenoteManager -> IO (Either String [Note])
-getIndex snmgr = getIndex' Nothing [] where
-  getIndex' mark data0 = do
-    let (mgr, email, token) = snmgr
-    let params0 = [("email", email), ("auth", token), ("length", "100")]
-    let params = maybe params0 (\x -> ("mark", x) : params0) mark
-    req <- defaultRequest "api2/index" "GET" params
-    res <- httpLbs req mgr
-    checkStatusCode res "Get index status error: "
-      (\r -> case decode . responseBody $ r :: Maybe NoteIndex of
-         Nothing -> return . Left $ "Get index JSON decode error"
-         Just index -> case nmark index of
-           Nothing -> return . Right $ data0 ++ ndata index
-           x -> getIndex' x (data0 ++ ndata index))
+getIndex :: SimplenoteManager IO (Either String [Note])
+getIndex = do
+  (mgr, email, token) <- ask
+  liftIO $ getIndex' (mgr, email, token) Nothing [] where
+    getIndex' (mgr, email, token) mark data0 = do
+      let params0 = [("email", email), ("auth", token), ("length", "100")]
+      let params = maybe params0 (\x -> ("mark", x) : params0) mark
+      req <- defaultRequest "api2/index" "GET" params
+      res <- httpLbs req mgr
+      checkStatusCode res "Get index status error: "
+        (\r -> case decode . responseBody $ r :: Maybe NoteIndex of
+           Nothing -> return . Left $ "Get index JSON decode error"
+           Just index -> case nmark index of
+             Nothing -> return . Right $ data0 ++ ndata index
+             x -> getIndex' (mgr, email, token) x (data0 ++ ndata index))
 
-getNote :: SimplenoteManager -> String -> IO (Either String Note)
-getNote snmgr nkey = do
-  let (mgr, email, token) = snmgr
+getNote :: String -> SimplenoteManager IO (Either String Note)
+getNote nkey = do
+  (mgr, email, token) <- ask
   let params = [("email", email), ("auth", token)]
-  req <- defaultRequest ("api2/data/" ++ nkey) "GET" params
-  res <- httpLbs req mgr
-  checkStatusCode res "Get note status error: "
-    (\r -> case decode . responseBody $ r :: Maybe Note of
-       Nothing -> return . Left $ "Get note JSON decode error"
-       Just note -> return . Right $ note)
+  req <- liftIO $ defaultRequest ("api2/data/" ++ nkey) "GET" params
+  res <- liftIO $ httpLbs req mgr
+  liftIO $ checkStatusCode res "Get note status error: "
+    (\r -> liftIO . return $ case decode . responseBody $ r :: Maybe Note of
+       Nothing -> Left $ "Get note JSON decode error"
+       Just note -> Right $ note)
 
-updateNote :: SimplenoteManager -> Note -> IO (Either String Note)
-updateNote snmgr note = do
-  let (mgr, email, token) = snmgr
+updateNote :: Note -> SimplenoteManager IO (Either String Note)
+updateNote note = do
+  (mgr, email, token) <- ask
   let params = [("email", email), ("auth", token)]
-  req <- defaultRequest ("api2/data" ++ maybe "" ('/':) (key note)) "POST" params
+  req <- liftIO $ defaultRequest ("api2/data" ++ maybe "" ('/':) (key note))
+         "POST" params
   let note1 = note { content = fmap urlEncode (content note) }
-  res <- httpLbs req { requestBody = RequestBodyLBS (encode note1) } mgr
-  checkStatusCode res "Update note status error: "
-    (\r -> case decode . responseBody $ r :: Maybe Note of
-       Nothing -> return . Left $ "Update note JSON decode error"
-       Just note' -> return . Right $ note' { content = content note })
+  res <- liftIO $ httpLbs req { requestBody = RequestBodyLBS (encode note1) } mgr
+  liftIO $ checkStatusCode res "Update note status error: "
+    (\r -> liftIO . return $ case decode . responseBody $ r :: Maybe Note of
+       Nothing -> Left $ "Update note JSON decode error"
+       Just note' -> Right $ note' { content = content note })
 
-createNote :: SimplenoteManager -> String -> IO (Either String Note)
-createNote snmgr str = do
-  time <- fmap posixTimeToStr getPOSIXTime
+createNote :: String -> SimplenoteManager IO (Either String Note)
+createNote str = do
+  time <- liftIO $ fmap posixTimeToStr getPOSIXTime
   let note = nullNote { createdate = Just time, modifydate = Just time,
                         content = Just str }
-  updateNote snmgr note
+  updateNote note
 
-deleteNote :: SimplenoteManager -> String -> IO (Either String ())
-deleteNote snmgr nKey = do
-  let (mgr, email, token) = snmgr
+deleteNote :: String -> SimplenoteManager IO (Either String ())
+deleteNote nKey = do
+  (mgr, email, token) <- ask
   let params = [("email", email), ("auth", token)]
-  req <- defaultRequest ("api2/data/" ++ nKey) "DELETE" params
-  res <- httpLbs req mgr
-  checkStatusCode res "Update note status error: "
-    (\_ -> return . Right $ ())
+  req <- liftIO $ defaultRequest ("api2/data/" ++ nKey) "DELETE" params
+  res <- liftIO $ httpLbs req mgr
+  liftIO $ checkStatusCode res "Update note status error: "
+    (\_ -> liftIO . return . Right $ ())
 
-newSimplenote :: String -> String -> IO (Either String SimplenoteManager)
+newSimplenote :: String -> String -> IO (Either String SimplenoteEnv)
 newSimplenote email pass = do
   mgr <- newManager conduitManagerSettings
   ret <- getToken mgr email pass
@@ -139,16 +143,16 @@ newSimplenote email pass = do
     Right token -> return . Right $ (mgr, email, token)
     Left err -> return . Left $ err
 
-closeSimplenote :: SimplenoteManager -> IO ()
-closeSimplenote snmgr = do
-  let (mgr, _, _) = snmgr
+closeSimplenote :: SimplenoteEnv -> IO ()
+closeSimplenote env = do
+  let (mgr, _, _) = env
   closeManager mgr
 
 runSimplenote :: String -> String
-                 -> (SimplenoteManager -> IO (Either String a))
+                 -> SimplenoteManager IO (Either String a)
                  -> IO (Either String a)
 runSimplenote email pass process = runResourceT $ do
   ret <- liftIO $ newSimplenote email pass
   case ret of
-    Right snmgr -> liftIO $ process snmgr
+    Right env -> liftIO $ runReaderT process env
     Left err -> return . Left $ err

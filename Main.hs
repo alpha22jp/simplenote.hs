@@ -32,13 +32,13 @@ main :: IO ()
 main = do
   let email = "abc@example.com"
   let pass = "password"
-  ret <- runSimplenote email pass $ \mgr -> do
-    Right notes <- getIndex mgr
-    forM_ notes (\i -> do ret <- getNote mgr (fromJust $ key i)
+  ret <- runSimplenote email pass $ do
+    Right notes <- getIndex
+    forM_ notes (\i -> do ret <- getNote (fromJust $ key i)
                           case ret of
                             Left err -> liftIO $ print err
                             Right note -> liftIO $ showNote note)
-    -- ret <- liftIO $ createNote mgr "New note 1\nTest + / - _ for Simplenote.hs"
+    -- ret <- liftIO $ createNote "New note 1\nTest + / - _ for Simplenote.hs"
     -- case ret of
     --   Left err -> liftIO $ print err
     --   Right note -> liftIO $ showNote note
