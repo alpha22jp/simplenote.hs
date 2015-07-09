@@ -23,19 +23,18 @@ type SimplenoteManager a = ReaderT SimplenoteEnv a
 
 data Note = Note { key :: Maybe String,
                    content :: Maybe String,
-                   modifydate :: Maybe String,
-                   createdate :: Maybe String,
-                   tags :: Maybe [String],
-                   systemtags :: Maybe [String],
-                   deleted :: Maybe Int,
-                   version :: Maybe Int,
-                   minversion :: Maybe Int,
-                   syncnum :: Maybe Int
+                   modifydate :: String,
+                   createdate :: String,
+                   tags :: [String],
+                   systemtags :: [String],
+                   deleted :: Int,
+                   version :: Int,
+                   minversion :: Int,
+                   syncnum :: Int
                  } deriving Show
 
 nullNote :: Note
-nullNote = Note Nothing Nothing Nothing Nothing Nothing
-           Nothing Nothing Nothing Nothing Nothing 
+nullNote = Note Nothing Nothing "" "" [] [] 0 0 0 0
 
 deriveJSON defaultOptions { omitNothingFields = True } ''Note
 
@@ -122,7 +121,7 @@ updateNote note = do
 createNote :: String -> SimplenoteManager IO (Either String Note)
 createNote str = do
   time <- liftIO $ fmap posixTimeToStr getPOSIXTime
-  let note = nullNote { createdate = Just time, modifydate = Just time,
+  let note = nullNote { createdate = time, modifydate = time,
                         content = Just str }
   updateNote note
 
