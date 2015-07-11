@@ -32,25 +32,18 @@ main :: IO ()
 main = do
   let email = "abc@example.com"
   let pass = "password"
-  _ <- runSimplenote email pass $ do
-    ret <- getIndex
-    case ret of
-      Left err -> liftIO $ print err
-      Right notes -> 
-        forM_ notes (\i -> do ret <- getNote (fromJust $ key i)
-                              case ret of
-                                Left err -> liftIO $ print err
-                                Right note -> liftIO $ showNote note)
-    ret <- getNote "faab06d722bc11e5b1f671c420ef68f5"
-    -- ret <- createNote "New note 1\nTest + / - _ for Simplenote.hs"
-    case ret of
-      Left err -> liftIO $ print err
-      Right note -> do
-        liftIO $ showNote note
-        time <- liftIO $ fmap posixTimeToStr getPOSIXTime
-        Right note' <- updateNote note {
-          modifydate = time,
-          content = fmap  (++ "Updated !!!\n") (content note) }
-        liftIO $ showNote note'
-    return $ Right ()
-  return ()
+  ret <- runSimplenote email pass $ do
+    notes <- getIndex
+    forM_ notes (\i -> do note <- getNote (fromJust $ key i)
+                          liftIO $ showNote note)
+    note <- getNote "faab06d722bc11e5b1f671c420ef68f5"
+    liftIO $ showNote note
+    -- note <- createNote "New note 1\nTest + / - _ for Simplenote.hs"
+    time <- liftIO $ fmap posixTimeToStr getPOSIXTime
+    note' <- updateNote note {
+      modifydate = time,
+      content = fmap  (++ "Updated !!!\n") (content note) }
+    liftIO $ showNote note'
+  case ret of
+    Left err -> print err
+    _ -> return ()
