@@ -101,7 +101,7 @@ getNote nkey = do
   (mgr, email, token) <- ask
   let params = [("email", email), ("auth", token)]
   req <- liftIO $ defaultRequest ("api2/data/" ++ nkey) "GET" params
-  res <- liftIO $ httpLbs req mgr
+  res <- httpLbs req mgr
   lift $ checkStatusCode res "Get note status error: "
     (\r -> case decode . responseBody $ r :: Maybe Note of
        Nothing -> throwError "Get note JSON decode error"
@@ -114,7 +114,7 @@ updateNote note = do
   req <- liftIO $ defaultRequest ("api2/data" ++ maybe "" ('/':) (key note))
          "POST" params
   let note1 = note { content = fmap urlEncode (content note) }
-  res <- liftIO $ httpLbs req { requestBody = RequestBodyLBS (encode note1) } mgr
+  res <- httpLbs req { requestBody = RequestBodyLBS (encode note1) } mgr
   lift $ checkStatusCode res "Update note status error: "
     (\r -> case decode . responseBody $ r :: Maybe Note of
        Nothing -> throwError "Update note JSON decode error"
@@ -132,7 +132,7 @@ deleteNote nKey = do
   (mgr, email, token) <- ask
   let params = [("email", email), ("auth", token)]
   req <- liftIO $ defaultRequest ("api2/data/" ++ nKey) "DELETE" params
-  res <- liftIO $ httpLbs req mgr
+  res <- httpLbs req mgr
   lift $ checkStatusCode res "Update note status error: " (\_ -> return ())
 
 newSimplenote :: String -> String -> ErrorT String IO SimplenoteEnv
