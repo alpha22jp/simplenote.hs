@@ -60,8 +60,9 @@ defaultRequest url method' params = do
 checkStatusCode :: Response body -> String
                 -> (Response body -> ErrorT String IO a)
                 -> ErrorT String IO a
-checkStatusCode res errMsg process =
-  if code /= 200 then throwError $ errMsg ++ show code else process res
+checkStatusCode res errMsg process
+  | code == 200 = process res
+  | otherwise = throwError $ errMsg ++ show code
   where code = statusCode . responseStatus $ res
 
 getToken :: Manager -> String -> String -> ErrorT String IO String
@@ -143,14 +144,19 @@ newSimplenote email pass = do
   token <- getToken mgr email pass
   return (mgr, email, token)
 
+openSimplenote :: String -> String -> IO (Either String SimplenoteEnv)
+openSimplenote email pass = runErrorT $ newSimplenote email pass
+
 closeSimplenote :: SimplenoteEnv -> IO ()
 closeSimplenote env = do
   let (mgr, _, _) = env
   closeManager mgr
 
-runSimplenote :: String -> String
-                 -> SimplenoteManager ()
+runSimplenote :: SimplenoteEnv -> SimplenoteManager a -> IO (Either String a)
+runSimplenote env mgr = runErrorT $ runReaderT mgr env
+
+withSimplenote :: String -> String -> SimplenoteManager ()
                  -> IO (Either String ())
-runSimplenote email pass process = runErrorT $ runResourceT $ do
+withSimplenote email pass process = runErrorT $ runResourceT $ do
   env <- lift $ newSimplenote email pass
   lift $ runReaderT process env

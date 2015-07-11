@@ -32,7 +32,7 @@ main :: IO ()
 main = do
   let email = "abc@example.com"
   let pass = "password"
-  ret <- runSimplenote email pass $ do
+  ret <- withSimplenote email pass $ do
     notes <- getIndex
     forM_ notes (\i -> do note <- getNote (fromJust $ key i)
                           liftIO $ showNote note)
@@ -45,5 +45,5 @@ main = do
       content = fmap  (++ "Updated !!!\n") (content note) }
     liftIO $ showNote note'
   case ret of
-    Left err -> print err
+    Left err -> putStrLn $ "Error: " ++ err
     _ -> return ()
