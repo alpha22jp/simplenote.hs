@@ -3,6 +3,7 @@
 
 module Simplenote where
 
+import SafeAction
 import Network.HTTP.Conduit
 import Network.HTTP (urlEncode, urlEncodeVars)
 import Network.HTTP.Types.Status (Status(..))
@@ -66,7 +67,7 @@ checkStatusCode res errMsg process =
 getToken :: Manager -> String -> String -> ErrorT String IO String
 getToken mgr email pass = do
   req <- liftIO $ defaultRequest "api/login" "POST" []
-  res <- httpLbs req {
+  res <- safeAction $ httpLbs req {
     requestBody = RequestBodyBS . Base64.encode . BS.pack $
                   urlEncodeVars [("email", email), ("password", pass)] } mgr
   checkStatusCode res "Get token status error: " $
@@ -85,7 +86,7 @@ getIndex' mark notes = do
   let params0 = [("email", email), ("auth", token), ("length", "100")]
   let params = maybe params0 (\x -> ("mark", x) : params0) mark
   req <- liftIO $ defaultRequest "api2/index" "GET" params
-  res <- httpLbs req mgr
+  res <- lift . safeAction $ httpLbs req mgr
   lift $ checkStatusCode res "Get index status error: "
     (\r -> case decode . responseBody $ r :: Maybe NoteIndex of
        Nothing -> throwError "Get index JSON decode error"
@@ -101,7 +102,7 @@ getNote nkey = do
   (mgr, email, token) <- ask
   let params = [("email", email), ("auth", token)]
   req <- liftIO $ defaultRequest ("api2/data/" ++ nkey) "GET" params
-  res <- httpLbs req mgr
+  res <- lift . safeAction $ httpLbs req mgr
   lift $ checkStatusCode res "Get note status error: "
     (\r -> case decode . responseBody $ r :: Maybe Note of
        Nothing -> throwError "Get note JSON decode error"
@@ -114,7 +115,8 @@ updateNote note = do
   req <- liftIO $ defaultRequest ("api2/data" ++ maybe "" ('/':) (key note))
          "POST" params
   let note1 = note { content = fmap urlEncode (content note) }
-  res <- httpLbs req { requestBody = RequestBodyLBS (encode note1) } mgr
+  res <- lift . safeAction $ httpLbs req {
+    requestBody = RequestBodyLBS (encode note1) } mgr
   lift $ checkStatusCode res "Update note status error: "
     (\r -> case decode . responseBody $ r :: Maybe Note of
        Nothing -> throwError "Update note JSON decode error"
@@ -132,7 +134,7 @@ deleteNote nKey = do
   (mgr, email, token) <- ask
   let params = [("email", email), ("auth", token)]
   req <- liftIO $ defaultRequest ("api2/data/" ++ nKey) "DELETE" params
-  res <- httpLbs req mgr
+  res <- lift . safeAction $ httpLbs req mgr
   lift $ checkStatusCode res "Update note status error: " (\_ -> return ())
 
 newSimplenote :: String -> String -> ErrorT String IO SimplenoteEnv
