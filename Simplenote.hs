@@ -151,8 +151,6 @@ closeSimplenote env = do
 runSimplenote :: String -> String
                  -> SimplenoteManager ()
                  -> IO (Either String ())
-runSimplenote email pass process = runResourceT $ do
-  ret <- liftIO $ runErrorT $ newSimplenote email pass
-  case ret of
-    Left err -> return . Left $ err
-    Right env -> liftIO $ runErrorT $ runReaderT process env
+runSimplenote email pass process = runErrorT $ runResourceT $ do
+  env <- lift $ newSimplenote email pass
+  lift $ runReaderT process env
